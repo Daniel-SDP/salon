@@ -28,4 +28,16 @@ class Appointment extends Model
     {
         return $this->belongsTo(Service::class);
     }
+
+    public static function hasOverlap(int $employeeId, string $date, string $startTime, string $endTime, ?int $ignoreId = null): bool {
+        return self::where('employee_id', $employeeId)
+            ->where('date', $date)
+            ->where('status', '!=', 'canceled')
+            ->when($ignoreId, fn ($q) => $q->where('id', '!=', $ignoreId))
+            ->where(function ($q) use ($startTime, $endTime) {
+                $q->where('start_time', '<', $endTime)
+                    ->where('end_time',   '>', $startTime);
+            })
+            ->exists();
+    }
 }
