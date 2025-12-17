@@ -4,9 +4,11 @@ namespace App\Filament\Resources\Appointments\Schemas;
 
 use App\Models\Employee;
 use App\Models\Service;
+use App\Models\Appointment;
 use App\Services\AvailableTimeService;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Radio;
 use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Schema;
 
@@ -24,17 +26,17 @@ class AppointmentForm
                                 Select::make('salon_id')
                                     ->label('Salon')
                                     ->relationship('salon', 'name')
+                                    ->searchable()
                                     ->reactive()
                                     ->required()
-                                    ->afterStateHydrated(fn ($state, callable $set, $record) => $set('salon_id', $record?->salon_id))
                                     ->afterStateUpdated(fn ($set) => $set('service_id', null)),
 
                                 Select::make('service_id')
                                     ->label('Service')
                                     ->options(fn (callable $get) => $get('salon_id') ? Service::where('salon_id', $get('salon_id'))->pluck('name', 'id') : [])
+                                    ->searchable()
                                     ->reactive()
                                     ->required()
-                                    ->afterStateHydrated(fn ($state, callable $set, $record) => $set('service_id', $record?->service_id))
                                     ->afterStateUpdated(fn ($set) => $set('employee_id', null)),
                             ]),
 
@@ -45,18 +47,16 @@ class AppointmentForm
                                     ->options(fn (callable $get) => $get('salon_id') && $get('service_id') ? Employee::where('salon_id', $get('salon_id'))->where('is_active', true)->pluck('name','id') : [])
                                     ->reactive()
                                     ->required()
-                                    ->afterStateHydrated(fn ($state, callable $set, $record) => $set('employee_id', $record?->employee_id))
                                     ->afterStateUpdated(fn ($set) => $set('date', null)),
 
                                 DatePicker::make('date')
                                     ->required()
-                                    ->reactive()
-                                    ->afterStateHydrated(fn ($state, callable $set, $record) => $set('date', $record?->date)),
+                                    ->reactive(),
                             ]),
 
                         Wizard\Step::make('Select Time')
                             ->schema([
-                                Select::make('start_time')
+                                Radio::make('start_time')
                                     ->label('Start Time')
                                     ->options(function (callable $get, $record = null) {
                                         $employeeId = $get('employee_id');
@@ -67,15 +67,31 @@ class AppointmentForm
                                             return [];
                                         }
 
-                                        $service = \App\Models\Service::find($serviceId);
+                                        $service = Service::find($serviceId);
                                         $serviceDuration = $service?->duration ?? 30;
+                                        $capacity = $service?->capacity ?? 1;
 
-                                        $availableTimes = (new \App\Services\AvailableTimeService())
+                                        $availableTimes = (new AvailableTimeService())
                                             ->getAvailableTimes($employeeId, $date, $serviceDuration, $serviceId);
 
-                                        $options = collect($availableTimes)->mapWithKeys(fn($slot) => [
-                                            $slot['start'] => $slot['start'] . '-' . $slot['end'] . ' (' . ($service->buffer_minutes ?? 0) . ' min gap)',
-                                        ])->toArray();
+                                        $options = collect($availableTimes)->mapWithKeys(function ($slot) use ($service, $employeeId, $date, $capacity) {
+                                            // تعداد رزروهای موجود
+                                            $booked = Appointment::where('employee_id', $employeeId)
+                                                ->where('date', $date)
+                                                ->where('status', '!=', 'canceled')
+                                                ->where('start_time', $slot['start'])
+                                                ->count();
+
+                                            // رنگ‌بندی یا متن وضعیت
+                                            $label = $slot['start'] . '-' . $slot['end'] . ' (' . ($service->buffer_minutes ?? 0) . ' min gap)';
+                                            if ($booked >= $capacity) {
+                                                $label .= ' - Full';
+                                            } elseif ($booked > 0) {
+                                                $label .= " - {$booked}/{$capacity} booked";
+                                            }
+
+                                            return [$slot['start'] => $label];
+                                        })->toArray();
 
                                         // اضافه کردن مقدار قبلی record اگر وجود داشته باشد
                                         if ($record?->start_time && !isset($options[$record->start_time])) {
@@ -86,8 +102,8 @@ class AppointmentForm
                                     })
                                     ->default(fn($record) => $record?->start_time)
                                     ->reactive()
-                                    ->required()
-                        ]),
+                                    ->required(),
+                            ]),
 
                         Wizard\Step::make('Confirm & Book')
                             ->schema([
@@ -99,28 +115,5 @@ class AppointmentForm
                             ]),
                     ]),
             ]);
-    }
-
-    public static function getAvailableTimesForForm(callable $get): array
-    {
-        $employeeId = $get('employee_id');
-        $date = $get('date');
-        $serviceId = $get('service_id');
-
-        if (!$employeeId || !$date || !$serviceId) return [];
-
-        $service = Service::find($serviceId);
-        $serviceDuration = $service?->duration ?? 30;
-
-        $availableTimes = (new AvailableTimeService())->getAvailableTimes(
-            $employeeId,
-            $date,
-            $serviceDuration,
-            $serviceId
-        );
-
-        return collect($availableTimes)->mapWithKeys(fn($slot) => [
-            $slot['start'] => $slot['start'].'-'.$slot['end'].' ('.($service->buffer_minutes ?? 0).' min gap)',
-        ])->toArray();
     }
 }
