@@ -27,7 +27,15 @@ class EmployeeForm
 
                 Toggle::make('is_active')
                     ->label('Active')
-                    ->default(true)
+                    ->default(true),
+
+                Select::make('slot_strategy')
+                    ->label('Slot Strategy')
+                    ->options([
+                        'service' => 'Overlap-friendly',
+                        'total'   => 'Non-overlapping',
+                    ])
+                    ->default('service')
             ]);
     }
 }

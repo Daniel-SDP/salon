@@ -16,7 +16,6 @@ class AvailableTimeService
         ?int $serviceId = null
     ): array {
         $employee = Employee::findOrFail($employeeId);
-
         $dayOfWeek = Carbon::parse($date)->dayOfWeek;
 
         $workingHour = $employee->workingHours()
@@ -62,7 +61,8 @@ class AvailableTimeService
             $workEnd,
             $busyRanges,
             $serviceDuration,
-            $totalDuration
+            $totalDuration,
+            $employee
         );
     }
 
@@ -71,7 +71,8 @@ class AvailableTimeService
         Carbon $workEnd,
         array $busyRanges,
         int $serviceDuration,
-        int $totalDuration
+        int $totalDuration,
+        Employee $employee
     ): array {
         $freeSlots = [];
         $current = $workStart->copy();
@@ -85,7 +86,8 @@ class AvailableTimeService
                         $current,
                         $busyStart,
                         $serviceDuration,
-                        $totalDuration
+                        $totalDuration,
+                        $employee
                     )
                 );
             }
@@ -102,7 +104,8 @@ class AvailableTimeService
                     $current,
                     $workEnd,
                     $serviceDuration,
-                    $totalDuration
+                    $totalDuration,
+                    $employee
                 )
             );
         }
@@ -114,11 +117,11 @@ class AvailableTimeService
         Carbon $start,
         Carbon $end,
         int $serviceDuration,
-        int $totalDuration
+        int $totalDuration,
+        Employee $employee
     ): array {
         $slots = [];
-
-        $stepMinutes = $this->slotStepMinutes($serviceDuration, $totalDuration);
+        $stepMinutes = $this->slotStepMinutes($serviceDuration, $totalDuration, $employee);
 
         while ($start->copy()->addMinutes($totalDuration)->lte($end)) {
             $slots[] = [
@@ -132,9 +135,12 @@ class AvailableTimeService
         return $slots;
     }
 
-    private function slotStepMinutes(int $serviceDuration, int $totalDuration): int
+    private function slotStepMinutes(int $serviceDuration, int $totalDuration, Employee $employee): int
     {
-        return config('booking.slot_step') === 'total'
+        // اولویت با آرایشگر است، اگر مقدار تنظیم شده داشته باشد
+        $strategy = $employee->slot_strategy ?? config('booking.slot_step');
+
+        return $strategy === 'total'
             ? $totalDuration
             : $serviceDuration;
     }

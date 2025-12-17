@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('name');
             $table->string('phone');
             $table->boolean('is_active')->default(true);
+            $table->enum('slot_strategy', ['service', 'total'])->default('service');
             $table->timestamps();
             $table->index(['salon_id', 'is_active']);
         });
