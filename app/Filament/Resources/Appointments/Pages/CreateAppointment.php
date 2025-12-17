@@ -14,25 +14,13 @@ class CreateAppointment extends CreateRecord
 {
     protected static string $resource = AppointmentResource::class;
 
-    protected function mutateFormDataBeforeCreate(array $data): array
-    {
-        $service = Service::find($data['service_id']);
-
-        $data['end_time'] = now()
-            ->setTimeFromTimeString($data['start_time'])
-            ->addMinutes($service->duration)
-            ->format('H:i');
-
-        return $data;
-    }
-
     protected function handleRecordCreation(array $data): Model
     {
         try {
-            return app(AppointmentService::class)->create($data);
-        } catch (\Exception $e) {
+            return app(AppointmentService::class)->reserve($data);
+        } catch (\RuntimeException $e) {
             Notification::make()
-                ->title('خطا در ثبت رزرو')
+                ->title('Error in reserving appointment')
                 ->body($e->getMessage())
                 ->danger()
                 ->send();

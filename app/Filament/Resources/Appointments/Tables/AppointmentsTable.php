@@ -20,6 +20,8 @@ class AppointmentsTable
                 TextColumn::make('service.name')->label('Service'),
                 TextColumn::make('employee.name')->label('Employee'),
                 TextColumn::make('date')->label('Date'),
+                TextColumn::make('start_time')->label('Start Time'),
+                TextColumn::make('end_time')->label('End Time'),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match ($state) {

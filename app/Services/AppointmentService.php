@@ -1,34 +1,55 @@
 <?php
 
 namespace App\Services;
+
 use App\Models\Appointment;
-use App\Models\Service;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Exception;
+use Carbon\Carbon;
 
 class AppointmentService
 {
-    public function create(array $data): Appointment
+    public function reserve(array $data): Appointment
     {
-        return DB::transaction(function () use ($data) {
+        $start = Carbon::parse($data['start_time']);
+        $duration = $data['duration'] ?? 30; // اگر داده نشده، مقدار پیش فرض
+        $buffer = $data['buffer'] ?? 0;
 
-            $service = Service::findOrFail($data['service_id']);
+        $end = $start->copy()->addMinutes($duration + $buffer);
 
-            $data['end_time'] = now()
-                ->setTimeFromTimeString($data['start_time'])
-                ->addMinutes($service->duration)
-                ->format('H:i');
+        $data['end_time'] = $end->format('H:i'); // حالا وجود دارد
 
-            if (Appointment::hasOverlap(
-                $data['employee_id'],
-                $data['date'],
-                $data['start_time'],
-                $data['end_time']
-            )) {
-                throw new Exception('این بازه زمانی قبلاً رزرو شده است.');
-            }
+        $lockKey = $this->lockKey(
+            $data['employee_id'],
+            $data['date'],
+            $data['start_time']
+        );
 
-            return Appointment::create($data);
+        return Cache::lock($lockKey, 10)->block(5, function () use ($data) {
+
+            return DB::transaction(function () use ($data) {
+
+                // چک نهایی (حتی اگر تایم قبلاً آزاد نشان داده شده)
+                $exists = Appointment::where('employee_id', $data['employee_id'])
+                    ->where('date', $data['date'])
+                    ->where('status', '!=', 'canceled')
+                    ->where(function ($q) use ($data) {
+                        $q->whereBetween('start_time', [$data['start_time'], $data['end_time']])
+                            ->orWhereBetween('end_time', [$data['start_time'], $data['end_time']]);
+                    })
+                    ->exists();
+
+                if ($exists) {
+                    throw new \RuntimeException('This slot previously has been reserved.');
+                }
+
+                return Appointment::create($data);
+            });
         });
+    }
+
+    private function lockKey(int $employeeId, string $date, string $startTime): string
+    {
+        return "slot:$employeeId:$date:$startTime";
     }
 }
