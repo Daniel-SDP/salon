@@ -32,12 +32,13 @@ class AppointmentForm
 
                 Select::make('service_id')
                     ->label('Service')
-                    ->options(function (callable $get){
+                    ->options(function (callable $get) {
                         $salonId = $get('salon_id');
-                        if( !$salonId )
-                            return [];
+                        if (!$salonId) return [];
 
-                        return Service::where('salon_id', $salonId)->pluck('name', 'id')->toArray();
+                        return Service::where('salon_id', $salonId)
+                            ->pluck('name', 'id')
+                            ->toArray();
                     })
                     ->reactive()
                     ->live()
@@ -47,12 +48,14 @@ class AppointmentForm
 
                 Select::make('employee_id')
                     ->label('Employee')
-                    ->options(function (callable $get){
+                    ->options(function (callable $get) {
                         $salonId = $get('salon_id');
-                        if( !$salonId )
-                            return [];
+                        if (!$salonId) return [];
 
-                        return Employee::where('salon_id', $salonId)->where('is_active', true)->pluck('name', 'id')->toArray();
+                        return Employee::where('salon_id', $salonId)
+                            ->where('is_active', true)
+                            ->pluck('name', 'id')
+                            ->toArray();
                     })
                     ->reactive()
                     ->live()
@@ -63,25 +66,28 @@ class AppointmentForm
                 DatePicker::make('date')
                     ->reactive()
                     ->live()
-                    ->required(),
+                    ->required()
+                    ->afterStateUpdated(fn ($set) => $set('start_time', null)),
 
                 Select::make('start_time')
                     ->label('Start Time')
-                    ->options(function (callable $get){
+                    ->options(function (callable $get) {
                         $employeeId = $get('employee_id');
                         $date = $get('date');
                         $serviceId = $get('service_id');
 
-                        if(!$employeeId || !$date || !$serviceId )
-                            return [];
+                        if (!$employeeId || !$date || !$serviceId) return [];
 
                         $service = Service::find($serviceId);
-                        $serviceDuration = $service?->duraion ?? 30;
+                        $serviceDuration = $service?->duration ?? 30; // اصلاح تایپ
+                        $buffer = $service?->buffer_minutes ?? 0;
 
-                        $availableTimes = (new AvailableTimeService())->getAvailableTimes($employeeId, $date, $serviceDuration, $serviceId);
-                        return collect($availableTimes)->mapWithKeys(function ($slot) use ($service) {
+                        $availableTimes = (new AvailableTimeService())
+                            ->getAvailableTimes($employeeId, $date, $serviceDuration, $serviceId);
+
+                        return collect($availableTimes)->mapWithKeys(function ($slot) use ($buffer) {
                             return [
-                                $slot['start'] => $slot['start'] . '-' . $slot['end'] . ' (including ' . $service->buffer_minutes . ' minute gap)',
+                                $slot['start'] => $slot['start'] . '-' . $slot['end'] . " (including {$buffer} min gap)",
                             ];
                         })->toArray();
                     })
@@ -100,5 +106,6 @@ class AppointmentForm
                     ])
                     ->required(),
             ]);
+
     }
 }

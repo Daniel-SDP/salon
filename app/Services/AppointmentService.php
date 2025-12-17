@@ -3,45 +3,49 @@
 namespace App\Services;
 
 use App\Models\Appointment;
+use App\Models\Service;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class AppointmentService
 {
+    /**
+     * ثبت رزرو با رعایت Lock و Capacity
+     */
     public function reserve(array $data): Appointment
     {
         $start = Carbon::parse($data['start_time']);
-        $duration = $data['duration'] ?? 30; // اگر داده نشده، مقدار پیش فرض
+        $duration = $data['duration'] ?? 30; // مقدار پیش‌فرض
         $buffer = $data['buffer'] ?? 0;
 
         $end = $start->copy()->addMinutes($duration + $buffer);
+        $data['end_time'] = $end->format('H:i');
 
-        $data['end_time'] = $end->format('H:i'); // حالا وجود دارد
+        $serviceId = $data['service_id'] ?? null;
+        $serviceCapacity = 1;
 
-        $lockKey = $this->lockKey(
-            $data['employee_id'],
-            $data['date'],
-            $data['start_time']
-        );
+        if ($serviceId) {
+            $serviceCapacity = Service::find($serviceId)?->capacity ?? 1;
+        }
 
-        return Cache::lock($lockKey, 10)->block(5, function () use ($data) {
+        $lockKey = $this->lockKey($data['employee_id'], $data['date'], $data['start_time']);
 
-            return DB::transaction(function () use ($data) {
+        return Cache::lock($lockKey, 10)->block(5, function () use ($data, $serviceCapacity, $start, $end) {
 
-                // چک نهایی (حتی اگر تایم قبلاً آزاد نشان داده شده)
-                $exists = Appointment::where('employee_id', $data['employee_id'])
+            return DB::transaction(function () use ($data, $serviceCapacity, $start, $end) {
+
+                // تعداد رزروهای همزمان
+                $existing = Appointment::where('employee_id', $data['employee_id'])
                     ->where('date', $data['date'])
                     ->where('status', '!=', 'canceled')
-                    ->where(function ($q) use ($data) {
-                        $q->whereBetween('start_time', [$data['start_time'], $data['end_time']])
-                            ->orWhereBetween('end_time', [$data['start_time'], $data['end_time']]);
-                    })
-                    ->exists();
+                    ->where('start_time', $data['start_time'])
+                    ->count();
 
-                if ($exists) {
-                    throw new \RuntimeException('This slot previously has been reserved.');
+                if ($existing >= $serviceCapacity) {
+                    throw new \RuntimeException('The selected slot is full.');
                 }
+
 
                 return Appointment::create($data);
             });

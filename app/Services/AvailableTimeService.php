@@ -9,6 +9,9 @@ use Carbon\Carbon;
 
 class AvailableTimeService
 {
+    /**
+     * دریافت اسلات‌های آزاد برای یک کارمند و سرویس مشخص
+     */
     public function getAvailableTimes(
         int $employeeId,
         string $date,
@@ -22,14 +25,15 @@ class AvailableTimeService
             ->where('day_of_week', $dayOfWeek)
             ->first();
 
-        if (!$workingHour) {
-            return [];
-        }
+        if (!$workingHour) return [];
 
-        // Buffer
+        // Buffer و Capacity
         $bufferMinutes = 0;
+        $capacity = 1;
         if ($serviceId) {
-            $bufferMinutes = Service::find($serviceId)?->buffer_minutes ?? 0;
+            $service = Service::find($serviceId);
+            $bufferMinutes = $service?->buffer_minutes ?? 0;
+            $capacity = $service?->capacity ?? 1;
         }
 
         $totalDuration = $serviceDuration + $bufferMinutes;
@@ -37,108 +41,49 @@ class AvailableTimeService
         $workStart = Carbon::parse("$date {$workingHour->start_time}");
         $workEnd   = Carbon::parse("$date {$workingHour->end_time}");
 
-        if ($workStart->copy()->addMinutes($totalDuration)->gt($workEnd)) {
-            return [];
-        }
+        if ($workStart->copy()->addMinutes($totalDuration)->gt($workEnd)) return [];
 
+        // گرفتن رزروهای موجود یک بار برای efficiency
         $appointments = Appointment::where('employee_id', $employeeId)
             ->where('date', $date)
             ->where('status', '!=', 'canceled')
-            ->orderBy('start_time')
             ->get();
 
-        $busyRanges = [];
-
-        foreach ($appointments as $appointment) {
-            $busyRanges[] = [
-                Carbon::parse("$date {$appointment->start_time}"),
-                Carbon::parse("$date {$appointment->end_time}"),
-            ];
-        }
-
-        return $this->calculateFreeSlots(
-            $workStart,
-            $workEnd,
-            $busyRanges,
-            $serviceDuration,
-            $totalDuration,
-            $employee
-        );
-    }
-
-    private function calculateFreeSlots(
-        Carbon $workStart,
-        Carbon $workEnd,
-        array $busyRanges,
-        int $serviceDuration,
-        int $totalDuration,
-        Employee $employee
-    ): array {
-        $freeSlots = [];
+        $slots = [];
         $current = $workStart->copy();
 
-        foreach ($busyRanges as [$busyStart, $busyEnd]) {
+        while ($current->copy()->addMinutes($totalDuration)->lte($workEnd)) {
+            $slotStart = $current->copy();
+            $slotEnd   = $current->copy()->addMinutes($totalDuration);
 
-            if ($current->lt($busyStart)) {
-                $freeSlots = array_merge(
-                    $freeSlots,
-                    $this->splitSlots(
-                        $current,
-                        $busyStart,
-                        $serviceDuration,
-                        $totalDuration,
-                        $employee
-                    )
-                );
+            // تعداد رزروهای موجود در این اسلات
+            $existingCount = $appointments->filter(function ($appointment) use ($slotStart, $slotEnd) {
+                $aStart = Carbon::parse("$appointment->date {$appointment->start_time}");
+                $aEnd   = Carbon::parse("$appointment->date {$appointment->end_time}");
+                return $aStart->lt($slotEnd) && $aEnd->gt($slotStart);
+            })->count();
+
+            if ($existingCount < $capacity) {
+                $slots[] = [
+                    'start' => $slotStart->format('H:i'),
+                    'end'   => $slotEnd->format('H:i'),
+                ];
             }
 
-            if ($current->lt($busyEnd)) {
-                $current = $busyEnd->copy();
-            }
-        }
-
-        if ($current->lt($workEnd)) {
-            $freeSlots = array_merge(
-                $freeSlots,
-                $this->splitSlots(
-                    $current,
-                    $workEnd,
-                    $serviceDuration,
-                    $totalDuration,
-                    $employee
-                )
-            );
-        }
-
-        return $freeSlots;
-    }
-
-    private function splitSlots(
-        Carbon $start,
-        Carbon $end,
-        int $serviceDuration,
-        int $totalDuration,
-        Employee $employee
-    ): array {
-        $slots = [];
-        $stepMinutes = $this->slotStepMinutes($serviceDuration, $totalDuration, $employee);
-
-        while ($start->copy()->addMinutes($totalDuration)->lte($end)) {
-            $slots[] = [
-                'start' => $start->format('H:i'),
-                'end'   => $start->copy()->addMinutes($totalDuration)->format('H:i'),
-            ];
-
-            $start->addMinutes($stepMinutes);
+            // تعیین گام بعدی اسلات
+            $stepMinutes = $this->slotStepMinutes($serviceDuration, $totalDuration, $employee);
+            $current->addMinutes($stepMinutes);
         }
 
         return $slots;
     }
 
+    /**
+     * محاسبه گام بعدی اسلات
+     */
     private function slotStepMinutes(int $serviceDuration, int $totalDuration, Employee $employee): int
     {
-        // اولویت با آرایشگر است، اگر مقدار تنظیم شده داشته باشد
-        $strategy = $employee->slot_strategy ?? config('booking.slot_step');
+        $strategy = $employee->slot_strategy ?? config('booking.slot_step', 'service');
 
         return $strategy === 'total'
             ? $totalDuration

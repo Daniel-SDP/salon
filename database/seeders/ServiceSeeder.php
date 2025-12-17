@@ -23,6 +23,7 @@ class ServiceSeeder extends Seeder
                 'price' => 150000,
                 'duration' => 30,
                 'buffer_minutes' => 10,
+                'capacity' => 1,
             ],
             [
                 'salon_id' => $salon->id,
@@ -30,6 +31,7 @@ class ServiceSeeder extends Seeder
                 'price' => 400000,
                 'duration' => 60,
                 'buffer_minutes' => 20,
+                'capacity' => 2,
             ]
         ]);
     }

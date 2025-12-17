@@ -30,6 +30,12 @@ class ServiceForm
                     ->label('Duration')
                     ->numeric()
                     ->required(),
+
+                TextInput::make('capacity')
+                    ->label('Capacity')
+                    ->numeric()
+                    ->minValue(1)
+                    ->default(1),
             ]);
     }
 }

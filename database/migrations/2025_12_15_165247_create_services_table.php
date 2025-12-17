@@ -17,6 +17,7 @@ return new class extends Migration
             $table->string('name');
             $table->unsignedInteger('price');
             $table->unsignedInteger('duration');
+            $table->unsignedTinyInteger('capacity')->default(1);
             $table->unsignedSmallInteger('buffer_minutes')->default(0);
             $table->timestamps();
             $table->index('salon_id');
