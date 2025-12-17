@@ -21,13 +21,15 @@ class ServiceSeeder extends Seeder
                 'salon_id' => $salon->id,
                 'name' => 'Haircut',
                 'price' => 150000,
-                'duration' => 30
+                'duration' => 30,
+                'buffer_minutes' => 10,
             ],
             [
                 'salon_id' => $salon->id,
                 'name' => 'Hair Coloring',
                 'price' => 400000,
-                'duration' => 60
+                'duration' => 60,
+                'buffer_minutes' => 20,
             ]
         ]);
     }

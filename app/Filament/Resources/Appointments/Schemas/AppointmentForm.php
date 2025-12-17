@@ -75,12 +75,13 @@ class AppointmentForm
                         if(!$employeeId || !$date || !$serviceId )
                             return [];
 
-                        $serviceDuration = Service::find($serviceId)?->duraion ?? 30;
+                        $service = Service::find($serviceId);
+                        $serviceDuration = $service?->duraion ?? 30;
 
-                        $availableTimes = (new AvailableTimeService())->getAvailableTimes($employeeId, $date, $serviceDuration);
-                        return collect($availableTimes)->mapWithKeys(function ($slot){
+                        $availableTimes = (new AvailableTimeService())->getAvailableTimes($employeeId, $date, $serviceDuration, $serviceId);
+                        return collect($availableTimes)->mapWithKeys(function ($slot) use ($service) {
                             return [
-                                $slot['start'] => $slot['start'] . '-' . $slot['end'],
+                                $slot['start'] => $slot['start'] . '-' . $slot['end'] . ' (including ' . $service->buffer_minutes . ' minute gap)',
                             ];
                         })->toArray();
                     })

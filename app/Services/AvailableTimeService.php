@@ -4,45 +4,75 @@ namespace App\Services;
 
 use App\Models\Appointment;
 use App\Models\Employee;
+use App\Models\Service;
 use Carbon\Carbon;
 
 class AvailableTimeService
 {
-    /**
-     * Create a new class instance.
-     */
-    public function __construct()
-    {
-        //
-    }
-
-    public function getAvailableTimes(int $employeeId, string $date, int $serviceDuration) : array
-    {
+    public function getAvailableTimes(
+        int $employeeId,
+        string $date,
+        int $serviceDuration,
+        ?int $serviceId = null
+    ): array {
         $employee = Employee::findOrFail($employeeId);
+
         $dayOfWeek = Carbon::parse($date)->dayOfWeek;
-        $workingHour = $employee->workingHours()->where('day_of_week', $dayOfWeek)->first();
+
+        $workingHour = $employee->workingHours()
+            ->where('day_of_week', $dayOfWeek)
+            ->first();
+
         if (!$workingHour) {
             return [];
         }
 
-        $workStart = Carbon::parse($date . ' ' . $workingHour->start_time);
-        $workEnd = Carbon::parse($date . ' ' . $workingHour->end_time);
+        // Buffer
+        $bufferMinutes = 0;
+        if ($serviceId) {
+            $bufferMinutes = Service::find($serviceId)?->buffer_minutes ?? 0;
+        }
 
-        $appointments = Appointment::where('employee_id', $employeeId)->where('date', $date)->where('status', '!=', 'canceled')->orderBy('start_time')->get();
+        $totalDuration = $serviceDuration + $bufferMinutes;
+
+        $workStart = Carbon::parse("$date {$workingHour->start_time}");
+        $workEnd   = Carbon::parse("$date {$workingHour->end_time}");
+
+        if ($workStart->copy()->addMinutes($totalDuration)->gt($workEnd)) {
+            return [];
+        }
+
+        $appointments = Appointment::where('employee_id', $employeeId)
+            ->where('date', $date)
+            ->where('status', '!=', 'canceled')
+            ->orderBy('start_time')
+            ->get();
 
         $busyRanges = [];
 
         foreach ($appointments as $appointment) {
             $busyRanges[] = [
-                Carbon::parse($date . ' ' . $appointment->start_time),
-                Carbon::parse($date . ' ' . $appointment->end_time),
+                Carbon::parse("$date {$appointment->start_time}"),
+                Carbon::parse("$date {$appointment->end_time}"),
             ];
         }
 
-        return $this->calculateFreeSlots($workStart, $workEnd, $busyRanges, $serviceDuration);
+        return $this->calculateFreeSlots(
+            $workStart,
+            $workEnd,
+            $busyRanges,
+            $serviceDuration,
+            $totalDuration
+        );
     }
 
-    private function calculateFreeSlots(Carbon $workStart, Carbon $workEnd, array $busyRanges, int $duration): array {
+    private function calculateFreeSlots(
+        Carbon $workStart,
+        Carbon $workEnd,
+        array $busyRanges,
+        int $serviceDuration,
+        int $totalDuration
+    ): array {
         $freeSlots = [];
         $current = $workStart->copy();
 
@@ -51,39 +81,61 @@ class AvailableTimeService
             if ($current->lt($busyStart)) {
                 $freeSlots = array_merge(
                     $freeSlots,
-                    $this->splitSlots($current, $busyStart, $duration)
+                    $this->splitSlots(
+                        $current,
+                        $busyStart,
+                        $serviceDuration,
+                        $totalDuration
+                    )
                 );
             }
 
-            // move pointer after busy
             if ($current->lt($busyEnd)) {
                 $current = $busyEnd->copy();
             }
         }
 
-        // after last appointment
         if ($current->lt($workEnd)) {
             $freeSlots = array_merge(
                 $freeSlots,
-                $this->splitSlots($current, $workEnd, $duration)
+                $this->splitSlots(
+                    $current,
+                    $workEnd,
+                    $serviceDuration,
+                    $totalDuration
+                )
             );
         }
 
         return $freeSlots;
     }
 
-    private function splitSlots(Carbon $start, Carbon $end, int $duration) : array{
+    private function splitSlots(
+        Carbon $start,
+        Carbon $end,
+        int $serviceDuration,
+        int $totalDuration
+    ): array {
         $slots = [];
 
-        while ( $start->copy()->addMinutes($duration)->lte($end) ) {
+        $stepMinutes = $this->slotStepMinutes($serviceDuration, $totalDuration);
+
+        while ($start->copy()->addMinutes($totalDuration)->lte($end)) {
             $slots[] = [
                 'start' => $start->format('H:i'),
-                'end' => $start->copy()->addMinutes($duration)->format('H:i'),
+                'end'   => $start->copy()->addMinutes($totalDuration)->format('H:i'),
             ];
 
-            $start->addMinutes($duration);
+            $start->addMinutes($stepMinutes);
         }
 
         return $slots;
+    }
+
+    private function slotStepMinutes(int $serviceDuration, int $totalDuration): int
+    {
+        return config('booking.slot_step') === 'total'
+            ? $totalDuration
+            : $serviceDuration;
     }
 }
